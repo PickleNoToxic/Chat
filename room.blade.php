@@ -345,31 +345,22 @@
                     {{-- Chat Input --}}
                     <div class="chat-input border-top p-3">
                         <form id="chatForm" onsubmit="handleOptimisticSend(event)" enctype="multipart/form-data">
-                            {{-- Preview Wrapper --}}
-                            <div id="attachmentPreviewWrapper">
-                                {{-- Loading Preview --}}
-                                <div class="mb-2" wire:loading wire:target="attachment">
-                                    <div class="d-inline-flex align-items-center gap-2 text-muted small">
-                                        <span class="spinner-border spinner-border-sm" role="status"></span>
-                                        <span>{{ __('Loading photo preview...') }}</span>
+                            {{-- Preview Wrapper (JS-only to avoid Livewire flicker after send) --}}
+                            <div id="attachmentPreviewWrapper" wire:ignore>
+                                <div id="localAttachmentPreview" class="mb-2 d-none">
+                                    <div class="d-inline-flex align-items-start gap-2">
+                                        <img id="localAttachmentPreviewImage"
+                                            src=""
+                                            class="img-thumbnail"
+                                            style="max-height:150px;"
+                                            alt="{{ __('Attachment preview') }}">
+                                        <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            onclick="clearComposerAttachment()"
+                                            title="{{ __('Cancel image') }}">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
                                     </div>
-                                </div>
-
-                                {{-- Image Preview --}}
-                                <div class="mb-2" wire:loading.remove wire:target="attachment">
-                                    @if ($attachment)
-                                        <div class="d-inline-flex align-items-start gap-2">
-                                            <img src="{{ $attachment->temporaryUrl() }}"
-                                                class="img-thumbnail"
-                                                style="max-height:150px;">
-                                            <button type="button"
-                                                class="btn btn-sm btn-outline-danger"
-                                                wire:click="removeAttachment"
-                                                title="{{ __('Cancel image') }}">
-                                                <i class="bi bi-x-lg"></i>
-                                            </button>
-                                        </div>
-                                    @endif
                                 </div>
                             </div>
                             <div class="input-group mb-2">
@@ -379,7 +370,6 @@
                                     <i class="bi bi-image"></i>
                                     <input type="file"
                                         id="chatAttachmentInput"
-                                        wire:model="attachment"
                                         accept="image/*"
                                         hidden
                                         {{ $isTicketLocked ? 'disabled' : '' }}>
@@ -1208,6 +1198,41 @@
             onQueueItemFailed(tempId);
         });
 
+        function updateLocalAttachmentPreview(file) {
+            const preview = document.getElementById('localAttachmentPreview');
+            const image = document.getElementById('localAttachmentPreviewImage');
+            if (!preview || !image) return;
+
+            if (!file) {
+                image.src = '';
+                preview.classList.add('d-none');
+                return;
+            }
+
+            image.src = URL.createObjectURL(file);
+            preview.classList.remove('d-none');
+        }
+
+        window.clearComposerAttachment = function() {
+            const fileInput = document.getElementById('chatAttachmentInput');
+            if (fileInput) {
+                fileInput.value = '';
+            }
+
+            updateLocalAttachmentPreview(null);
+
+            const component = getComponent();
+            if (!component) return;
+
+            component.$wire.cancelUpload?.('attachment');
+            component.$wire.call('removeAttachment');
+        };
+
+        document.getElementById('chatAttachmentInput')?.addEventListener('change', (event) => {
+            const selectedFile = event.target?.files?.[0] ?? null;
+            updateLocalAttachmentPreview(selectedFile);
+        });
+
         // ── Form submit handler ───────────────────────────────────────
 
         window.handleOptimisticSend = function(event) {
@@ -1223,7 +1248,6 @@
 
             const inputEl   = document.getElementById('chatMessageInput');
             const fileInput = document.getElementById('chatAttachmentInput');
-            const previewWrapper = document.getElementById('attachmentPreviewWrapper');
             const text      = inputEl ? inputEl.value.trim() : '';
             const file      = fileInput?.files?.[0] ?? null;  // capture before clearing
 
@@ -1235,19 +1259,9 @@
                 inputEl.dispatchEvent(new Event('input', { bubbles: true }));
             }
 
-            // ── 2. Clear file input AND Livewire $attachment state ──
-            //    We call removeAttachment() here because we've already captured
-            //    the File object above. This ensures:
-            //    (a) The PHP-rendered preview div disappears on next Livewire morph
-            //    (b) $attachment is null, so the next queue item starts clean
-            //    The actual file is re-uploaded in processQueue() via $wire.upload()
-            if (previewWrapper) {
-                previewWrapper.style.display = 'none';
-            }
-            
+            // ── 2. Clear file input + local preview + Livewire upload state ──
             if (file) {
-                if (fileInput) fileInput.value = '';
-                component.$wire.call('removeAttachment');
+                clearComposerAttachment();
             }
 
             // ── 3. Enqueue ──
@@ -1271,6 +1285,8 @@
             if (fileInput) {
                 fileInput.value = '';
             }
+
+            updateLocalAttachmentPreview(null);
         });
 
         setTimeout(() => {
