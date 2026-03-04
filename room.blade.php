@@ -1013,7 +1013,23 @@
                 input.value = '';
             }
 
-            component.$wire.call('sendMessage', text.length > 0 ? text : null);
+            const sendPromise = component.$wire.call('sendMessage', text.length > 0 ? text : null);
+
+            if (text.length > 0) {
+                Promise.resolve(sendPromise)
+                    .then(() => {
+                        const currentPending = chatState.pendingMessagesByChatroom[chatroomId] ?? [];
+                        if (currentPending.length > 0) {
+                            currentPending.shift();
+                            chatState.pendingMessagesByChatroom[chatroomId] = currentPending;
+                            renderPendingMessages();
+                        }
+                    })
+                    .catch(() => {
+                        // Keep optimistic message visible when send fails.
+                        renderPendingMessages();
+                    });
+            }
         };
 
         const scrollToBottom = (force = false) => {
@@ -1048,19 +1064,10 @@
             const previousCount = chatState.messageCountByChatroom[currentChatroomId] ?? 0;
 
             const hasNewMessage = messageCount > previousCount;
-            const addedMessages = Math.max(messageCount - previousCount, 0);
 
             // Scroll setiap ada msg baru
             if (hasNewMessage) {
                 scrollToBottom(chatMessages);
-            }
-
-            if (addedMessages > 0) {
-                const pending = chatState.pendingMessagesByChatroom[currentChatroomId] ?? [];
-                if (pending.length > 0) {
-                    chatState.pendingMessagesByChatroom[currentChatroomId] = pending.slice(addedMessages);
-                    renderPendingMessages();
-                }
             }
 
             chatState.messageCountByChatroom[currentChatroomId] = messageCount;
