@@ -340,7 +340,7 @@
 
                     {{-- Chat Input --}}
                     <div class="chat-input border-top p-3">
-                        <form wire:submit.prevent="sendMessage" enctype="multipart/form-data">
+                        <form onsubmit="return false;" enctype="multipart/form-data">
                             {{-- Preview Image --}}
                             <div class="mb-2" wire:loading wire:target="attachment">
                                 <div class="d-inline-flex align-items-center gap-2 text-muted small">
@@ -379,17 +379,26 @@
 
                                 {{-- Text Input --}}
                                 <input type="text" 
+                                    id="chatMessageInput"
                                     class="form-control"
                                     placeholder="{{ __('Type a message...') }}"
                                     wire:model="newMessage"
+                                    onkeydown="if(event.key === 'Enter'){ event.preventDefault(); window.chatOptimisticSend(); }"
                                     autocomplete="off"
                                     {{ $isTicketLocked ? 'disabled' : '' }}>
 
                                 {{-- Send Button --}}
-                                <button class="btn btn-success" type="submit"
+                                <button class="btn btn-success" type="button"
+                                    onclick="window.chatOptimisticSend()"
                                     {{ $isTicketLocked ? 'disabled' : '' }}>
                                     <i class="bi bi-send-fill"></i> {{ __('Send') }}
                                 </button>
+                            </div>
+
+                            <div class="d-flex justify-content-end mb-2" wire:loading wire:target="sendMessage">
+                                <small class="text-muted">
+                                    <i class="bi bi-send"></i> {{ __('Sending message...') }}
+                                </small>
                             </div>
                             @php
                                 $canManageStatus =
@@ -926,6 +935,81 @@
         const chatState = {
             initializedChatrooms: new Set(),
             messageCountByChatroom: {},
+            pendingMessagesByChatroom: {},
+        };
+
+        const escapeHtml = (value) => {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        };
+
+        const renderPendingMessages = () => {
+            const chatMessages = document.getElementById('chatMessages');
+            if (!chatMessages) return;
+
+            chatMessages.querySelectorAll('.message.pending-local').forEach((el) => el.remove());
+
+            const component = Livewire.all()[0];
+            const currentChatroomId = component?.$wire?.chatRoomId
+                ?? component?.snapshot?.data?.chatRoomId
+                ?? null;
+
+            if (!currentChatroomId) return;
+
+            const pending = chatState.pendingMessagesByChatroom[currentChatroomId] ?? [];
+            pending.forEach((item) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'message outgoing pending-local';
+                wrapper.innerHTML = `
+                    <div class="message-content">
+                        <div class="message-header">
+                            <span class="message-sender">${escapeHtml(item.sender)}</span>
+                            <span class="message-time">${item.time}</span>
+                        </div>
+                        <div class="message-bubble">
+                            <p class="mb-0">${escapeHtml(item.text)}</p>
+                            <small class="text-muted d-inline-flex align-items-center gap-1 mt-1">
+                                <i class="bi bi-send"></i>
+                                Sending...
+                            </small>
+                        </div>
+                    </div>
+                `;
+
+                chatMessages.appendChild(wrapper);
+            });
+        };
+
+        window.chatOptimisticSend = () => {
+            const component = Livewire.all()[0];
+            if (!component) return;
+
+            const input = document.getElementById('chatMessageInput');
+            const text = (input?.value ?? '').trim();
+            const chatroomId = component.$wire?.chatRoomId ?? component.snapshot?.data?.chatRoomId;
+
+            if (!chatroomId) return;
+
+            if (text.length > 0) {
+                if (!chatState.pendingMessagesByChatroom[chatroomId]) {
+                    chatState.pendingMessagesByChatroom[chatroomId] = [];
+                }
+
+                chatState.pendingMessagesByChatroom[chatroomId].push({
+                    text,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    sender: @json(Auth::user()->name ?? 'You'),
+                });
+
+                renderPendingMessages();
+                scrollToBottom(true);
+            }
+
+            component.$wire.call('sendMessage');
         };
 
         const scrollToBottom = (force = false) => {
@@ -960,10 +1044,19 @@
             const previousCount = chatState.messageCountByChatroom[currentChatroomId] ?? 0;
 
             const hasNewMessage = messageCount > previousCount;
+            const addedMessages = Math.max(messageCount - previousCount, 0);
 
             // Scroll setiap ada msg baru
             if (hasNewMessage) {
                 scrollToBottom(chatMessages);
+            }
+
+            if (addedMessages > 0) {
+                const pending = chatState.pendingMessagesByChatroom[currentChatroomId] ?? [];
+                if (pending.length > 0) {
+                    chatState.pendingMessagesByChatroom[currentChatroomId] = pending.slice(addedMessages);
+                    renderPendingMessages();
+                }
             }
 
             chatState.messageCountByChatroom[currentChatroomId] = messageCount;
@@ -1120,6 +1213,7 @@
             scrollToBottom();
 
             syncChatScrollPosition();
+            renderPendingMessages();
             subscribeAllVisible();
         });
     }
