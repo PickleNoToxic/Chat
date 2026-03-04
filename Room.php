@@ -9,6 +9,7 @@ use App\Models\ChatRoomDetail;
 use App\Services\ImageUploadService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Validator;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -51,19 +52,26 @@ class Room extends Component
         $this->dispatch('chatRoomSelected', chatRoomId: $id);
     }
 
-    public function sendMessage()
+    public function sendMessage(?string $messageText = null)
     {
         if (!$this->chatRoomId) {
             return;
         }
 
-        $this->validate([
-            'newMessage' => 'nullable|string|max:5000',
-            'attachment' => 'nullable|image|max:10240' // max 10MB
-        ]);
+        $messageText = $messageText !== null
+            ? trim($messageText)
+            : trim((string) $this->newMessage);
 
-        // Return if both emptys
-        if (!$this->newMessage && !$this->attachment) {
+        Validator::make([
+            'newMessage' => $messageText,
+            'attachment' => $this->attachment,
+        ], [
+            'newMessage' => 'nullable|string|max:5000',
+            'attachment' => 'nullable|image|max:10240', // max 10MB
+        ])->validate();
+
+        // Return if both empty
+        if ($messageText === '' && !$this->attachment) {
             return;
         }
 
@@ -79,7 +87,7 @@ class Room extends Component
         $message = Message::create([
             'nidchatroom' => $this->chatRoomId,
             'niduser' => Auth::id(),
-            'ctext' => $this->newMessage,
+            'ctext' => $messageText,
             'cattachment_path' => $path,
         ]);
 

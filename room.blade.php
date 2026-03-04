@@ -1009,7 +1009,11 @@
                 scrollToBottom(true);
             }
 
-            component.$wire.call('sendMessage');
+            if (input) {
+                input.value = '';
+            }
+
+            component.$wire.call('sendMessage', text.length > 0 ? text : null);
         };
 
         const scrollToBottom = (force = false) => {
